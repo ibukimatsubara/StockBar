@@ -21,7 +21,7 @@ struct ContentView: View {
                     .padding(12)
             }
         }
-        .frame(width: 460)
+        .frame(width: 520)
     }
 
     private var header: some View {
@@ -57,7 +57,7 @@ struct ContentView: View {
             .onMove(perform: store.move)
         }
         .listStyle(.plain)
-        .frame(height: 240)
+        .frame(minHeight: 240, idealHeight: CGFloat(min(max(store.stocks.count, 4) * 44, 480)), maxHeight: 480)
     }
 
     private var addBar: some View {
