@@ -145,7 +145,7 @@ struct StockRow: View {
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(StockStore.formatPrice(q.price))
                         .font(.system(size: 12, design: .monospaced))
-                    Text(String(format: "%+.2f%%", q.changePercent))
+                    Text("\(StockStore.formatSigned(q.change))  \(String(format: "%+.2f%%", q.changePercent))")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(q.change >= 0 ? .red : .green)
                 }
