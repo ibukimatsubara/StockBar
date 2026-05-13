@@ -21,18 +21,17 @@ macOS のメニューバーに株価・指数・為替・暗号資産をロー�
 
 ### A. DMG からインストール（推奨）
 
-[Releases](https://github.com/ibukimatsubara/StockBar/releases/latest) から `StockBar-x.y.z.dmg` をダウンロード → 開いて `StockBar.app` を `Applications` にドラッグ。
+1. [Releases](https://github.com/ibukimatsubara/StockBar/releases/latest) から `StockBar-x.y.z.dmg` をダウンロード
+2. DMG を開いて `StockBar.app` を `Applications` にドラッグ
+3. **初回1回だけ** ターミナルで以下を実行：
 
-初回起動時に「開発元を確認できません」と出る場合：
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/StockBar.app && open /Applications/StockBar.app
+   ```
 
-- Finder で右クリック → **開く**（一度だけ）
-
-または、Gatekeeper の検疫属性を外して開く：
-
-```bash
-xattr -dr com.apple.quarantine /Applications/StockBar.app
-open /Applications/StockBar.app
-```
+> このアプリは Apple Developer ID で署名されていません（Apple Developer Program に年$99払うと不要になる）。
+> その関係で、ダブルクリックで開こうとすると「"StockBar" Not Opened」というモーダルが出てゴミ箱送りを勧められます。
+> 上の `xattr` コマンドで検疫属性を外せば、以降は普通にダブルクリックで起動できます。
 
 ### B. ソースからビルド（開発用）
 

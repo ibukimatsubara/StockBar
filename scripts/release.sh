@@ -29,6 +29,9 @@ if git rev-parse "${TAG}" >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "==> Generating app icon"
+./scripts/make-icon.sh
+
 echo "==> Building release binary"
 swift build -c release
 
@@ -36,6 +39,7 @@ mkdir -p "${DIST_DIR}"
 rm -rf "${APP_BUNDLE}" "${DMG_PATH}"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources"
 cp ".build/release/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+cp "Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,6 +53,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key>           <string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
+  <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>    <string>13.0</string>
   <key>LSUIElement</key>               <true/>
   <key>NSHighResolutionCapable</key>   <true/>
@@ -79,15 +84,17 @@ NOTES_FILE="$(mktemp)"
 cat > "${NOTES_FILE}" <<NOTES
 ## Install
 
-1. Download \`${APP_NAME}-${VERSION}.dmg\` below.
-2. Open it and drag \`${APP_NAME}.app\` into \`Applications\`.
-3. First launch: right-click the app → **Open** (signed ad-hoc, so Gatekeeper warns once).
+1. Download **\`${APP_NAME}-${VERSION}.dmg\`** (Assets ↓ から).
+2. DMG を開いて \`${APP_NAME}.app\` を **Applications** にドラッグ.
+3. ターミナルで以下を実行（**初回1回だけ必要**）:
 
-Or via CLI:
-\`\`\`bash
-xattr -dr com.apple.quarantine /Applications/${APP_NAME}.app
-open /Applications/${APP_NAME}.app
-\`\`\`
+   \`\`\`bash
+   xattr -dr com.apple.quarantine /Applications/${APP_NAME}.app && open /Applications/${APP_NAME}.app
+   \`\`\`
+
+> このアプリは Apple Developer ID で署名されていないため、上の手順を踏まずに開くと
+> "${APP_NAME}" Not Opened というモーダルが出てゴミ箱送りを促されます。
+> xattr で検疫属性を外せば普通に開けます（macOS の標準的な逃げ道）。
 
 ## Changes
 $(git log --pretty=format:'- %s' "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo HEAD~10)..HEAD" 2>/dev/null || git log --pretty=format:'- %s' -10)

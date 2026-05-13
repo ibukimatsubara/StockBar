@@ -11,6 +11,9 @@ APP_PATH="${INSTALL_DIR}/${APP_NAME}.app"
 cd "$(dirname "$0")"
 VERSION="$(cat VERSION 2>/dev/null || echo 0.0.0-dev)"
 
+echo "==> Generating app icon"
+./scripts/make-icon.sh
+
 echo "==> Building release binary"
 swift build -c release
 
@@ -29,6 +32,7 @@ TMP_APP="$(mktemp -d)/${APP_NAME}.app"
 mkdir -p "${TMP_APP}/Contents/MacOS"
 mkdir -p "${TMP_APP}/Contents/Resources"
 cp "${BIN_PATH}" "${TMP_APP}/Contents/MacOS/${APP_NAME}"
+cp "Resources/AppIcon.icns" "${TMP_APP}/Contents/Resources/AppIcon.icns"
 
 cat > "${TMP_APP}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -42,6 +46,7 @@ cat > "${TMP_APP}/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key>         <string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key>     <string>APPL</string>
+  <key>CFBundleIconFile</key>        <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>  <string>13.0</string>
   <key>LSUIElement</key>             <true/>
   <key>NSHighResolutionCapable</key> <true/>
