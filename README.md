@@ -1,6 +1,6 @@
 # StockBar
 
-> **仕事の集中力低下に最適！**
+# 🚀 仕事の集中力低下に最適！ 📉
 
 macOS のメニューバーに株価・指数・為替・暗号資産をローテーション表示する常駐アプリ。
 
@@ -19,17 +19,28 @@ macOS のメニューバーに株価・指数・為替・暗号資産をロー�
 
 ## インストール
 
+### A. DMG からインストール（推奨）
+
+[Releases](https://github.com/ibukimatsubara/StockBar/releases/latest) から `StockBar-x.y.z.dmg` をダウンロード → 開いて `StockBar.app` を `Applications` にドラッグ。
+
+初回起動時に「開発元を確認できません」と出る場合：
+
+- Finder で右クリック → **開く**（一度だけ）
+
+または、Gatekeeper の検疫属性を外して開く：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/StockBar.app
+open /Applications/StockBar.app
+```
+
+### B. ソースからビルド（開発用）
+
 ```bash
 ./install.sh
 ```
 
-このスクリプトは以下を行います：
-
-1. `swift build -c release` でリリースビルド
-2. `StockBar.app` バンドルを生成（`LSUIElement=true` で Dock 非表示）
-3. `/Applications/StockBar.app` に配置（必要なら sudo）
-4. ad-hoc 署名を付与
-5. 起動
+`swift build -c release` → `.app` バンドル生成 → `/Applications/StockBar.app` に配置 → 起動。
 
 ## ログイン時に自動起動する
 
@@ -73,6 +84,13 @@ rm -f ~/Library/Preferences/StockBar.plist
 swift run                # デバッグ実行
 swift build -c release   # リリースビルドのみ
 ```
+
+### リリース手順
+
+1. `VERSION` を更新（例: `0.1.0` → `0.1.1`）してコミット&push
+2. `./scripts/release.sh` を実行
+   - リリースビルド → `.app` → DMG → git tag → GitHub Release を一括作成
+   - 作業ツリーがクリーンで、まだ存在しないタグであることが前提
 
 ソース構成：
 

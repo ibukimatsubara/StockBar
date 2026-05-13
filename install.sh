@@ -9,6 +9,7 @@ INSTALL_DIR="/Applications"
 APP_PATH="${INSTALL_DIR}/${APP_NAME}.app"
 
 cd "$(dirname "$0")"
+VERSION="$(cat VERSION 2>/dev/null || echo 0.0.0-dev)"
 
 echo "==> Building release binary"
 swift build -c release
@@ -38,8 +39,8 @@ cat > "${TMP_APP}/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key>     <string>${APP_NAME}</string>
   <key>CFBundleExecutable</key>      <string>${APP_NAME}</string>
   <key>CFBundleIdentifier</key>      <string>${BUNDLE_ID}</string>
-  <key>CFBundleVersion</key>         <string>1</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleVersion</key>         <string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key>     <string>APPL</string>
   <key>LSMinimumSystemVersion</key>  <string>13.0</string>
   <key>LSUIElement</key>             <true/>
