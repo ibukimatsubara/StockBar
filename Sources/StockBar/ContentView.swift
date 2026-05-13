@@ -141,7 +141,17 @@ struct StockRow: View {
 
             Spacer()
 
-            if let q = stock.quote {
+            if let err = stock.lastError {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                        .font(.caption)
+                    Text("取得失敗")
+                        .font(.caption2)
+                        .foregroundColor(.yellow)
+                }
+                .help(err)
+            } else if let q = stock.quote {
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(StockStore.formatPrice(q.price))
                         .font(.system(size: 12, design: .monospaced))

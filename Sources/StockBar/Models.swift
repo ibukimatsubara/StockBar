@@ -7,6 +7,8 @@ struct Stock: Identifiable, Codable, Equatable {
     var visible: Bool = true
 
     var quote: Quote?
+    var lastError: String?
+    var lastFetched: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, symbol, nickname, visible

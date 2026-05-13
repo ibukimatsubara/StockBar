@@ -177,11 +177,18 @@ final class StockStore: ObservableObject {
             let q = try await YahooFinance.fetch(symbol: symbol)
             if let idx = stocks.firstIndex(where: { $0.symbol == symbol }) {
                 stocks[idx].quote = q
+                stocks[idx].lastError = nil
+                stocks[idx].lastFetched = Date()
             }
             lastError = nil
             onUpdate?()
         } catch {
+            if let idx = stocks.firstIndex(where: { $0.symbol == symbol }) {
+                stocks[idx].lastError = error.localizedDescription
+                stocks[idx].lastFetched = Date()
+            }
             lastError = error.localizedDescription
+            onUpdate?()
         }
     }
 
