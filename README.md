@@ -110,4 +110,4 @@ Sources/StockBar/
 
 ## ライセンス
 
-private / personal use
+[MIT](LICENSE) © ibukimatsubara
