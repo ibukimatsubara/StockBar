@@ -21,7 +21,7 @@ struct ContentView: View {
                     .padding(12)
             }
         }
-        .frame(width: 380)
+        .frame(width: 460)
     }
 
     private var header: some View {
@@ -105,6 +105,8 @@ struct ContentView: View {
 struct StockRow: View {
     @EnvironmentObject var store: StockStore
     let stock: Stock
+    @State private var draftNickname: String = ""
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -113,9 +115,22 @@ struct StockRow: View {
                 .font(.caption)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(stock.displayName)
+                TextField(stock.quote?.name ?? stock.symbol, text: $draftNickname)
                     .font(.system(size: 13, weight: .medium))
+                    .textFieldStyle(.plain)
                     .lineLimit(1)
+                    .focused($nameFocused)
+                    .help(stock.quote?.name ?? stock.symbol)
+                    .onAppear { draftNickname = stock.nickname ?? "" }
+                    .onChange(of: nameFocused) { focused in
+                        if !focused {
+                            store.setNickname(stock, to: draftNickname)
+                        }
+                    }
+                    .onSubmit {
+                        store.setNickname(stock, to: draftNickname)
+                        nameFocused = false
+                    }
                 Text(stock.symbol)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)

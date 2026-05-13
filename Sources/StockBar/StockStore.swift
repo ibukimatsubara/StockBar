@@ -133,6 +133,14 @@ final class StockStore: ObservableObject {
         onUpdate?()
     }
 
+    func setNickname(_ stock: Stock, to raw: String) {
+        guard let i = stocks.firstIndex(where: { $0.id == stock.id }) else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        stocks[i].nickname = trimmed.isEmpty ? nil : trimmed
+        save()
+        onUpdate?()
+    }
+
     func toggleVisible(_ stock: Stock) {
         guard let i = stocks.firstIndex(where: { $0.id == stock.id }) else { return }
         stocks[i].visible.toggle()
