@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>StockBar 仕様書</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel2: #20242d;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #5b8def;
+    --up: #ef4444;    /* 日本式: 上昇=赤 */
+    --down: #22c55e;  /* 日本式: 下落=緑 */
+    --border: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 32px 96px; }
+  h1 {
+    font-size: 32px;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+  }
+  h1 .tag {
+    font-size: 12px;
+    background: var(--accent);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 999px;
+    vertical-align: middle;
+    margin-left: 12px;
+    letter-spacing: 0.04em;
+  }
+  .lede { color: var(--muted); margin: 0 0 40px; font-size: 15px; }
+  h2 {
+    margin-top: 56px;
+    font-size: 20px;
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
+  }
+  h3 { margin-top: 32px; font-size: 16px; color: #cdd3e1; }
+  p, li { font-size: 14px; }
+  ul { padding-left: 22px; }
+  code {
+    background: var(--panel2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+  .up { color: var(--up); font-weight: 600; }
+  .down { color: var(--down); font-weight: 600; }
+
+  /* ---- メニューバー モック ---- */
+  .mockup-label { font-size: 12px; color: var(--muted); margin: 24px 0 8px; }
+  .menubar {
+    background: linear-gradient(180deg, #1d1f26 0%, #15171c 100%);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 13px;
+    color: #d6dae4;
+    backdrop-filter: blur(20px);
+  }
+  .menubar .left { display: flex; gap: 16px; align-items: center; }
+  .menubar .apple { font-size: 14px; }
+  .menubar .app { font-weight: 600; }
+  .menubar .spacer { flex: 1; }
+  .menubar .right { display: flex; gap: 14px; align-items: center; font-size: 12px; }
+  .menubar .stock {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+  }
+  .menubar .icon { opacity: 0.7; }
+
+  /* ---- 管理パネル モック ---- */
+  .panel-mock {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 380px;
+    margin: 12px 0;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .panel-mock .ph {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-mock .ph .title { font-weight: 600; font-size: 14px; }
+  .panel-mock .ph .focus {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(91,141,239,0.15);
+    color: var(--accent);
+    border: 1px solid rgba(91,141,239,0.3);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 16px 1fr auto auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .grip { color: var(--muted); cursor: grab; }
+  .row .name { display: flex; flex-direction: column; }
+  .row .name .code { color: var(--muted); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+  .row .price { font-variant-numeric: tabular-nums; font-size: 12px; }
+  .toggle {
+    width: 28px; height: 16px; border-radius: 999px;
+    background: #3a4150; position: relative;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: "";
+    position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: white;
+    transition: transform .2s;
+  }
+  .toggle.on::after { transform: translateX(12px); }
+  .row .del { color: var(--muted); cursor: pointer; }
+  .panel-mock .pf {
+    padding: 12px 16px;
+    display: flex;
+    gap: 8px;
+  }
+  .btn {
+    flex: 1;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+
+  .phase-list { counter-reset: phase; padding: 0; list-style: none; }
+  .phase-list li {
+    counter-increment: phase;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px 12px 48px;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .phase-list li::before {
+    content: "P" counter(phase);
+    position: absolute;
+    left: 12px; top: 12px;
+    background: var(--accent);
+    color: white;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .legend { display: flex; gap: 16px; margin: 8px 0 16px; font-size: 12px; color: var(--muted); }
+  .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 12px 0; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>StockBar <span class="tag">macOS menu bar app</span></h1>
+  <p class="lede">登録した銘柄の株価をメニューバーにローテーション表示する macOS 常駐アプリ。</p>
+
+  <h2>1. 完成イメージ</h2>
+
+  <p class="mockup-label">メニューバー表示（ローテーション）</p>
+  <div class="menubar">
+    <div class="left">
+      <span class="apple"></span>
+      <span class="app">Finder</span>
+      <span>File</span><span>Edit</span><span>View</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="right">
+      <span class="stock"><span class="icon">📈</span>日経平均 <b>38,250</b> <span class="up">+120 (+0.31%)</span></span>
+      <span class="icon">🔋</span>
+      <span class="icon">📶</span>
+      <span class="icon">🔍</span>
+      <span>14:32</span>
+    </div>
+  </div>
+
+  <div class="menubar" style="margin-top:6px;">
+    <div class="left">
+      <span class="apple"></span>
+      <span class="app">Finder</span>
+      <span>File</span><span>Edit</span><span>View</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="right">
+      <span class="stock"><span class="icon">📈</span>トヨタ <b>2,845</b> <span class="down">-15 (-0.52%)</span></span>
+      <span class="icon">🔋</span>
+      <span class="icon">📶</span>
+      <span class="icon">🔍</span>
+      <span>14:32</span>
+    </div>
+  </div>
+
+  <div class="menubar" style="margin-top:6px;">
+    <div class="left">
+      <span class="apple"></span>
+      <span class="app">Finder</span>
+      <span>File</span><span>Edit</span><span>View</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="right">
+      <span class="stock"><span class="icon">📈</span>ソニーG <b>3,512</b> <span class="up">+48 (+1.38%)</span></span>
+      <span class="icon">🔋</span>
+      <span class="icon">📶</span>
+      <span class="icon">🔍</span>
+      <span>14:32</span>
+    </div>
+  </div>
+
+  <p class="legend">
+    <span><span class="dot" style="background: var(--up)"></span>上昇（赤・日本式）</span>
+    <span><span class="dot" style="background: var(--down)"></span>下落（緑・日本式）</span>
+  </p>
+  <p style="color: var(--muted); font-size: 13px;">数秒間隔で銘柄を切り替えながら表示。市場が開いている時間は自動更新。</p>
+
+  <p class="mockup-label">クリック時のポップオーバー（銘柄管理）</p>
+  <div class="panel-mock">
+    <div class="ph">
+      <div class="title">StockBar</div>
+      <div class="focus">● 集中モード OFF</div>
+    </div>
+
+    <div class="row">
+      <span class="grip">⋮⋮</span>
+      <div class="name"><span>日経平均</span><span class="code">^N225</span></div>
+      <span class="price up">+0.31%</span>
+      <div class="toggle on"></div>
+      <span class="del">✕</span>
+    </div>
+    <div class="row">
+      <span class="grip">⋮⋮</span>
+      <div class="name"><span>トヨタ自動車</span><span class="code">7203.T</span></div>
+      <span class="price down">-0.52%</span>
+      <div class="toggle on"></div>
+      <span class="del">✕</span>
+    </div>
+    <div class="row">
+      <span class="grip">⋮⋮</span>
+      <div class="name"><span>ソニーグループ</span><span class="code">6758.T</span></div>
+      <span class="price up">+1.38%</span>
+      <div class="toggle on"></div>
+      <span class="del">✕</span>
+    </div>
+    <div class="row">
+      <span class="grip">⋮⋮</span>
+      <div class="name" style="opacity:.5"><span>Apple</span><span class="code">AAPL</span></div>
+      <span class="price" style="opacity:.5">—</span>
+      <div class="toggle"></div>
+      <span class="del">✕</span>
+    </div>
+
+    <div class="pf">
+      <div class="btn">＋ 銘柄追加</div>
+      <div class="btn">⚙ 設定</div>
+      <div class="btn primary">集中モード</div>
+    </div>
+  </div>
+  <p style="color: var(--muted); font-size: 13px;">
+    ドラッグで並び替え、トグルで個別の表示/非表示、右下「集中モード」で一括非表示（会議・画面共有用）。
+  </p>
+
+  <h2>2. コア機能</h2>
+
+  <h3>2.1 表示内容</h3>
+  <ul>
+    <li>銘柄名（or 銘柄コード）</li>
+    <li>現在値</li>
+    <li>前日終値比（円 + %）</li>
+    <li>騰落の色分け：<span class="up">プラス=赤</span> / <span class="down">マイナス=緑</span></li>
+  </ul>
+
+  <h3>2.2 ローテーション</h3>
+  <ul>
+    <li>複数銘柄を一定間隔で順に切り替え</li>
+    <li>順序はユーザー指定（管理画面でドラッグ並び替え）</li>
+    <li>切替間隔は設定可（3 / 5 / 10秒など）</li>
+  </ul>
+
+  <h3>2.3 自動更新</h3>
+  <ul>
+    <li>市場時間中のみ取得（東証 9:00–11:30 / 12:30–15:00 JST）</li>
+    <li>市場閉場中は最後の値を表示、更新停止</li>
+    <li>更新間隔は設定可（デフォルト 1 分）</li>
+  </ul>
+
+  <h2>3. 銘柄管理 UI</h2>
+
+  <p>メニューバーアイコンをクリックでポップオーバーが開く。</p>
+
+  <table>
+    <tr><th>機能</th><th>挙動</th></tr>
+    <tr><td>追加</td><td>銘柄コード入力 → API で名称取得 → 確認後に登録</td></tr>
+    <tr><td>削除</td><td>各行の ✕ ボタン</td></tr>
+    <tr><td>並び替え</td><td>ドラッグハンドルで上下入れ替え（=表示順）</td></tr>
+    <tr><td>個別非表示</td><td>トグルでローテーションから一時的に除外</td></tr>
+    <tr><td>集中モード</td><td>1クリックで全銘柄を一括非表示（会議・画面共有用）</td></tr>
+    <tr><td>設定</td><td>切替速度、更新間隔、表示フォーマット</td></tr>
+  </table>
+
+  <h2>4. データソース</h2>
+  <p>当面は <code>query1.finance.yahoo.com</code>（Yahoo Finance 非公式）を採用。銘柄コードは Yahoo 形式：</p>
+  <ul>
+    <li>日本株：<code>7203.T</code>（トヨタ）</li>
+    <li>指数：<code>^N225</code>（日経平均）</li>
+    <li>米国株：<code>AAPL</code></li>
+  </ul>
+  <p style="color: var(--muted); font-size: 13px;">将来的に Alpha Vantage / Finnhub への切替も視野。</p>
+
+  <h2>5. 技術スタック</h2>
+  <ul>
+    <li>Swift + SwiftUI</li>
+    <li><code>MenuBarExtra</code>（macOS 13+）</li>
+    <li><code>URLSession</code> + async/await</li>
+    <li>永続化：<code>UserDefaults</code> or JSON ファイル</li>
+  </ul>
+
+  <h2>6. 開発フェーズ</h2>
+  <ol class="phase-list">
+    <li>1銘柄固定で取得 → メニューバー表示する最小実装</li>
+    <li>複数銘柄 + ローテーション</li>
+    <li>銘柄管理ポップオーバー（追加/削除/並び替え/個別非表示）</li>
+    <li>設定（速度・更新間隔）+ 集中モード</li>
+    <li>市場時間判定・永続化・仕上げ</li>
+  </ol>
+
+  <h2>7. スコープ外（将来検討）</h2>
+  <ul>
+    <li>指値到達アラート / 通知</li>
+    <li>チャート表示</li>
+    <li>ポートフォリオ管理（保有数・評価損益）</li>
+    <li>複数通貨換算</li>
+  </ul>
+
+</div>
+</body>
+</html>

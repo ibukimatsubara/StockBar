@@ -1,0 +1,46 @@
+import AppKit
+import SwiftUI
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
+    private let store = StockStore()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(togglePopover(_:))
+        statusItem.button?.title = "StockBar"
+
+        popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 380, height: 460)
+        popover.contentViewController = NSHostingController(
+            rootView: ContentView().environmentObject(store)
+        )
+
+        store.onUpdate = { [weak self] in
+            self?.refreshTitle()
+        }
+        store.start()
+    }
+
+    @objc private func togglePopover(_ sender: Any?) {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    private func refreshTitle() {
+        guard let button = statusItem.button else { return }
+        let title = store.menuBarAttributedTitle()
+        button.attributedTitle = title
+    }
+}

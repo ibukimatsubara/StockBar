@@ -1,0 +1,93 @@
+# StockBar
+
+macOS のメニューバーに株価・指数・為替・暗号資産をローテーション表示する常駐アプリ。
+
+- 上昇=赤 / 下落=緑（日本式）
+- 複数銘柄をローテーション表示
+- クリックで管理ポップオーバー（追加・削除・並び替え・個別非表示）
+- 集中モード（会議・画面共有用の一括非表示）
+- 切替間隔 / 更新間隔をスライダーで調整
+- 市場閉場中（日本・米国とも閉場）は自動更新を停止
+- データソース: Yahoo Finance（非公式チャートAPI）
+
+## 必要環境
+
+- macOS 13 (Ventura) 以降
+- Swift 5.9+（Xcode 15 以降を入れていればOK）
+
+## インストール
+
+```bash
+./install.sh
+```
+
+このスクリプトは以下を行います：
+
+1. `swift build -c release` でリリースビルド
+2. `StockBar.app` バンドルを生成（`LSUIElement=true` で Dock 非表示）
+3. `/Applications/StockBar.app` に配置（必要なら sudo）
+4. ad-hoc 署名を付与
+5. 起動
+
+## ログイン時に自動起動する
+
+`System Settings` → `General` → `Login Items & Extensions` → **Open at Login** の `+` から `/Applications/StockBar.app` を選択。
+
+CLI でやる場合：
+
+```bash
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/StockBar.app", hidden:true}'
+```
+
+解除する場合：
+
+```bash
+osascript -e 'tell application "System Events" to delete login item "StockBar"'
+```
+
+## アンインストール
+
+```bash
+osascript -e 'tell application "System Events" to delete login item "StockBar"' 2>/dev/null || true
+pkill -f "/StockBar$" 2>/dev/null || true
+rm -rf /Applications/StockBar.app
+rm -f ~/Library/Preferences/StockBar.plist
+```
+
+## 銘柄コードの書き方（Yahoo Finance 形式）
+
+| 種類 | 例 | 備考 |
+|---|---|---|
+| 日本株 | `7203.T` または `7203` | 4桁数字は自動で `.T` を補完 |
+| 米国株 | `AAPL`, `MSFT` | そのまま |
+| 指数 | `^N225`, `^IXIC`, `^GSPC` | 先頭に `^` |
+| 為替 | `USDJPY=X`, `EURJPY=X` | 末尾 `=X` |
+| 商品先物 | `GC=F` (金), `CL=F` (原油) | 末尾 `=F` |
+| 暗号資産 | `BTC-USD`, `ETH-USD` | ハイフン区切り |
+
+## 開発
+
+```bash
+swift run                # デバッグ実行
+swift build -c release   # リリースビルドのみ
+```
+
+ソース構成：
+
+```
+Sources/StockBar/
+  StockBarApp.swift   # @main エントリ
+  AppDelegate.swift   # NSStatusItem + NSPopover の組み立て
+  StockStore.swift    # 状態管理・取得・ローテーション・永続化
+  YahooFinance.swift  # API クライアント
+  Models.swift        # Stock / Quote
+  ContentView.swift   # ポップオーバー UI（SwiftUI）
+```
+
+## 設定の保存場所
+
+`~/Library/Preferences/StockBar.plist`（`UserDefaults`）
+
+## ライセンス
+
+private / personal use
