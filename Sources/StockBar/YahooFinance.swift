@@ -39,7 +39,7 @@ enum YahooFinance {
                     let quote: [QuoteSeries]
                 }
                 struct QuoteSeries: Decodable {
-                    let close: [Double?]
+                    let close: [Double?]?
                 }
                 let meta: Meta
                 let timestamp: [Int]?
@@ -81,7 +81,7 @@ enum YahooFinance {
         var latestPrice: Double = regularPrice
 
         if let timestamps = result.timestamp,
-           let closes = result.indicators?.quote.first?.close,
+           let closes = result.indicators?.quote.first?.close ?? nil,
            !timestamps.isEmpty {
             for i in stride(from: timestamps.count - 1, through: 0, by: -1) {
                 guard i < closes.count, let c = closes[i] else { continue }
