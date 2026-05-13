@@ -1,6 +1,8 @@
-# StockBar
+<p align="center">
+  <img src="Resources/banner.png" alt="StockBar — 仕事の集中力低下に最適！" width="100%">
+</p>
 
-# 🚀 仕事の集中力低下に最適！ 📉
+# StockBar
 
 macOS のメニューバーに株価・指数・為替・暗号資産をローテーション表示する常駐アプリ。
 
