@@ -264,8 +264,14 @@ final class StockStore: ObservableObject {
             ))
             return
         }
-        let nameCol    = Self.pad(name,                              width: Self.columnWidth, alignRight: false)
-        let priceCol   = Self.pad(Self.formatPrice(q.price),         width: Self.columnWidth, alignRight: true)
+        let nameCol = Self.pad(name, width: Self.columnWidth, alignRight: false)
+        let priceCol: String
+        if let m = q.sessionMarker {
+            let inner = Self.pad(Self.formatPrice(q.price), width: Self.columnWidth - 2, alignRight: true)
+            priceCol = "\(m) \(inner)"
+        } else {
+            priceCol = Self.pad(Self.formatPrice(q.price), width: Self.columnWidth, alignRight: true)
+        }
         let changeCol  = Self.pad(Self.formatSigned(q.change),       width: Self.columnWidth, alignRight: true)
         let percentCol = Self.pad(String(format: "%+.2f%%", q.changePercent),
                                                                      width: Self.columnWidth, alignRight: true)

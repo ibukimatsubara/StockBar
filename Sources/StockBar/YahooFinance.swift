@@ -24,8 +24,26 @@ enum YahooFinance {
                     let longName: String?
                     let currency: String?
                     let symbol: String?
+                    let currentTradingPeriod: TradingPeriods?
+                }
+                struct TradingPeriods: Decodable {
+                    let pre: Period?
+                    let regular: Period?
+                    let post: Period?
+                }
+                struct Period: Decodable {
+                    let start: Int
+                    let end: Int
+                }
+                struct Indicators: Decodable {
+                    let quote: [QuoteSeries]
+                }
+                struct QuoteSeries: Decodable {
+                    let close: [Double?]
                 }
                 let meta: Meta
+                let timestamp: [Int]?
+                let indicators: Indicators?
             }
             struct ErrorBody: Decodable {
                 let code: String?
@@ -39,7 +57,7 @@ enum YahooFinance {
 
     static func fetch(symbol: String) async throws -> Quote {
         let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
-        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=1d&range=1d")!
+        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=1m&range=1d&includePrePost=true")!
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
@@ -55,9 +73,54 @@ enum YahooFinance {
             throw YahooFinanceError.notFound(symbol)
         }
         let meta = result.meta
-        let price = meta.regularMarketPrice ?? 0
-        let prev = meta.chartPreviousClose ?? meta.previousClose ?? price
+        let regularPrice = meta.regularMarketPrice ?? 0
+        let prevDayClose = meta.chartPreviousClose ?? meta.previousClose ?? regularPrice
+
+        // 最新の非nilバーを後ろから探し、そのセッションを判定
+        var session: MarketSession = .regular
+        var latestPrice: Double = regularPrice
+
+        if let timestamps = result.timestamp,
+           let closes = result.indicators?.quote.first?.close,
+           !timestamps.isEmpty {
+            for i in stride(from: timestamps.count - 1, through: 0, by: -1) {
+                guard i < closes.count, let c = closes[i] else { continue }
+                let t = timestamps[i]
+                if let p = meta.currentTradingPeriod?.pre, t >= p.start && t < p.end {
+                    session = .pre
+                } else if let p = meta.currentTradingPeriod?.regular, t >= p.start && t < p.end {
+                    session = .regular
+                } else if let p = meta.currentTradingPeriod?.post, t >= p.start && t < p.end {
+                    session = .post
+                } else {
+                    session = .closed
+                }
+                latestPrice = c
+                break
+            }
+        }
+
+        // 比較ベースライン:
+        //  - pre / regular: 前営業日の終値
+        //  - post (AH): 本日の通常セッション終値（= regularMarketPrice）
+        //  - closed: 最後の通常終値があればそれ、なければ前日終値
+        let baseline: Double
+        switch session {
+        case .pre, .regular:
+            baseline = prevDayClose
+        case .post:
+            baseline = regularPrice != 0 ? regularPrice : prevDayClose
+        case .closed:
+            baseline = regularPrice != 0 ? regularPrice : prevDayClose
+        }
+
         let name = meta.shortName ?? meta.longName
-        return Quote(price: price, previousClose: prev, name: name, currency: meta.currency)
+        return Quote(
+            price: latestPrice,
+            previousClose: baseline,
+            name: name,
+            currency: meta.currency,
+            session: session
+        )
     }
 }

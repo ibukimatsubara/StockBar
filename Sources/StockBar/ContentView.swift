@@ -131,9 +131,12 @@ struct StockRow: View {
                         store.setNickname(stock, to: draftNickname)
                         nameFocused = false
                     }
-                Text(stock.symbol)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
+                HStack(spacing: 6) {
+                    Text(stock.symbol)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                    sessionBadge(for: stock.quote?.session)
+                }
             }
 
             Spacer()
@@ -166,6 +169,32 @@ struct StockRow: View {
         }
         .padding(.vertical, 2)
         .opacity(stock.visible ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func sessionBadge(for session: MarketSession?) -> some View {
+        switch session {
+        case .pre:
+            badgeView("PRE", color: .orange)
+        case .post:
+            badgeView("AH", color: .purple)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func badgeView(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundColor(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(
+                Capsule().fill(color.opacity(0.15))
+            )
+            .overlay(
+                Capsule().stroke(color.opacity(0.4), lineWidth: 0.5)
+            )
     }
 }
 
