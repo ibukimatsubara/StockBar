@@ -6,15 +6,14 @@ import Combine
 final class StockStore: ObservableObject {
     @Published var stocks: [Stock] = []
     @Published var rotationInterval: TimeInterval = 5
-    @Published var updateInterval: TimeInterval = 60
+    @Published var simultaneousCount: Int = 1
     @Published var focusMode: Bool = false
-    @Published private(set) var currentIndex: Int = 0
+    @Published private(set) var chunkIndex: Int = 0
     @Published private(set) var lastError: String?
 
     var onUpdate: (() -> Void)?
 
     private var rotationTimer: Timer?
-    private var updateTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
     private let stocksKey = "StockBar.stocks.v1"
@@ -31,11 +30,12 @@ final class StockStore: ObservableObject {
             }
             .store(in: &cancellables)
 
-        $updateInterval
+        $simultaneousCount
             .dropFirst()
             .sink { [weak self] _ in
-                self?.startUpdateTimer()
+                self?.chunkIndex = 0
                 self?.savePrefs()
+                self?.onUpdate?()
             }
             .store(in: &cancellables)
     }
@@ -43,31 +43,60 @@ final class StockStore: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
-        Task { await refreshAll() }
+        Task {
+            await refreshChunk(at: 0)
+            onUpdate?()
+            await prefetchNext()
+        }
         startRotationTimer()
-        startUpdateTimer()
         onUpdate?()
     }
 
     private func startRotationTimer() {
         rotationTimer?.invalidate()
         rotationTimer = Timer.scheduledTimer(withTimeInterval: rotationInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.advanceRotation() }
+            Task { @MainActor in self?.tick() }
         }
     }
 
-    private func startUpdateTimer() {
-        updateTimer?.invalidate()
-        updateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
-            Task { await self?.refreshAll() }
-        }
-    }
-
-    private func advanceRotation() {
-        let vis = visibleStocks
-        guard !vis.isEmpty else { onUpdate?(); return }
-        currentIndex = (currentIndex + 1) % vis.count
+    /// 既にフェッチ済みの次グループを即座に表示し、さらに次のグループをバックグラウンドで先読みする。
+    private func tick() {
+        let groups = chunks
+        guard !groups.isEmpty else { onUpdate?(); return }
+        chunkIndex = (chunkIndex + 1) % groups.count
         onUpdate?()
+        Task { await prefetchNext() }
+    }
+
+    private func prefetchNext() async {
+        let groups = chunks
+        guard !groups.isEmpty else { return }
+        let next = (chunkIndex + 1) % groups.count
+        await refreshChunk(at: next)
+    }
+
+    private func refreshChunk(at index: Int) async {
+        let groups = chunks
+        guard groups.indices.contains(index) else { return }
+        for s in groups[index] {
+            await refreshOne(symbol: s.symbol)
+        }
+    }
+
+    /// 表示中銘柄を simultaneousCount 個ずつ固定的にグループ化したもの。
+    /// ラップアラウンドはせず、末尾が余ったらそのまま少ない数で表示する。
+    var chunks: [[Stock]] {
+        let vis = visibleStocks
+        let size = max(simultaneousCount, 1)
+        guard !vis.isEmpty else { return [] }
+        return stride(from: 0, to: vis.count, by: size).map {
+            Array(vis[$0..<min($0 + size, vis.count)])
+        }
+    }
+
+    /// ポップオーバーを開いたときに呼ぶ：全銘柄を一括で再取得。
+    func refreshOnOpen() {
+        Task { await refreshAll() }
     }
 
     // MARK: - Derived
@@ -99,7 +128,7 @@ final class StockStore: ObservableObject {
 
     func remove(_ stock: Stock) {
         stocks.removeAll { $0.id == stock.id }
-        if currentIndex >= max(visibleStocks.count, 1) { currentIndex = 0 }
+        chunkIndex = 0
         save()
         onUpdate?()
     }
@@ -107,7 +136,7 @@ final class StockStore: ObservableObject {
     func toggleVisible(_ stock: Stock) {
         guard let i = stocks.firstIndex(where: { $0.id == stock.id }) else { return }
         stocks[i].visible.toggle()
-        if currentIndex >= max(visibleStocks.count, 1) { currentIndex = 0 }
+        chunkIndex = 0
         save()
         onUpdate?()
     }
@@ -175,39 +204,138 @@ final class StockStore: ObservableObject {
 
     // MARK: - Menu bar title
 
-    func menuBarAttributedTitle() -> NSAttributedString {
-        let font = NSFont.menuBarFont(ofSize: 0)
+    struct MenuBarContent {
+        let title: NSAttributedString
+        let image: NSImage?
+    }
+
+    /// 各列の幅（半角セル数）
+    private static let columnWidth = 10
+
+    func menuBarContent() -> MenuBarContent {
+        let mono = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 
         if focusMode {
-            return NSAttributedString(string: "📊", attributes: [.font: font])
+            return MenuBarContent(
+                title: NSAttributedString(string: ""),
+                image: Self.risingChartIcon()
+            )
         }
         let vis = visibleStocks
         guard !vis.isEmpty else {
-            return NSAttributedString(string: "📊 StockBar", attributes: [.font: font])
-        }
-        let stock = vis[currentIndex % vis.count]
-        let name = stock.displayName
-        guard let q = stock.quote else {
-            return NSAttributedString(
-                string: "\(name) …",
-                attributes: [.font: font, .foregroundColor: NSColor.labelColor]
+            return MenuBarContent(
+                title: NSAttributedString(string: ""),
+                image: Self.risingChartIcon()
             )
         }
-
-        let priceStr = Self.formatPrice(q.price)
-        let changeStr = String(format: "%+.2f (%+.2f%%)", q.change, q.changePercent)
-        let color: NSColor = q.change >= 0 ? .systemRed : .systemGreen
-
+        let groups = chunks
+        guard !groups.isEmpty else {
+            return MenuBarContent(title: NSAttributedString(string: ""), image: Self.risingChartIcon())
+        }
+        let group = groups[chunkIndex % groups.count]
         let result = NSMutableAttributedString()
+        for (i, stock) in group.enumerated() {
+            if i > 0 {
+                result.append(NSAttributedString(
+                    string: "  |  ",
+                    attributes: [.font: mono, .foregroundColor: NSColor.tertiaryLabelColor]
+                ))
+            }
+            append(stock: stock, to: result, font: mono)
+        }
+        return MenuBarContent(title: result, image: nil)
+    }
+
+    private func append(stock: Stock, to result: NSMutableAttributedString, font mono: NSFont) {
+        let name = stock.displayName
+        guard let q = stock.quote else {
+            let s = Self.pad(name, width: Self.columnWidth, alignRight: false) + " …"
+            result.append(NSAttributedString(
+                string: s,
+                attributes: [.font: mono, .foregroundColor: NSColor.labelColor]
+            ))
+            return
+        }
+        let nameCol    = Self.pad(name,                              width: Self.columnWidth, alignRight: false)
+        let priceCol   = Self.pad(Self.formatPrice(q.price),         width: Self.columnWidth, alignRight: true)
+        let changeCol  = Self.pad(Self.formatSigned(q.change),       width: Self.columnWidth, alignRight: true)
+        let percentCol = Self.pad(String(format: "%+.2f%%", q.changePercent),
+                                                                     width: Self.columnWidth, alignRight: true)
+        let color: NSColor = q.change >= 0 ? .systemRed : .systemGreen
         result.append(NSAttributedString(
-            string: "\(name) \(priceStr) ",
-            attributes: [.font: font, .foregroundColor: NSColor.labelColor]
+            string: "\(nameCol) \(priceCol) ",
+            attributes: [.font: mono, .foregroundColor: NSColor.labelColor]
         ))
         result.append(NSAttributedString(
-            string: changeStr,
-            attributes: [.font: font, .foregroundColor: color]
+            string: "\(changeCol) \(percentCol)",
+            attributes: [.font: mono, .foregroundColor: color]
         ))
-        return result
+    }
+
+    static func formatSigned(_ v: Double) -> String {
+        let abs = formatPrice(Swift.abs(v))
+        return v >= 0 ? "+\(abs)" : "-\(abs)"
+    }
+
+    /// 文字列を「半角セル数」で計った固定幅に整形（CJK は 2 セル換算）。
+    /// 短ければスペースで埋め、長ければ切り詰める。
+    static func pad(_ s: String, width: Int, alignRight: Bool) -> String {
+        let w = visualWidth(s)
+        if w == width { return s }
+        if w < width {
+            let padding = String(repeating: " ", count: width - w)
+            return alignRight ? padding + s : s + padding
+        }
+        // truncate
+        var acc = ""
+        var used = 0
+        for ch in s {
+            let cw = visualWidth(String(ch))
+            if used + cw > width { break }
+            acc.append(ch)
+            used += cw
+        }
+        while visualWidth(acc) < width { acc += " " }
+        return acc
+    }
+
+    static func visualWidth(_ s: String) -> Int {
+        var w = 0
+        for scalar in s.unicodeScalars {
+            let v = scalar.value
+            if (0x1100...0x115F).contains(v)
+                || (0x2E80...0x303E).contains(v)
+                || (0x3041...0x33FF).contains(v)
+                || (0x3400...0x4DBF).contains(v)
+                || (0x4E00...0x9FFF).contains(v)
+                || (0xA000...0xA4CF).contains(v)
+                || (0xAC00...0xD7A3).contains(v)
+                || (0xF900...0xFAFF).contains(v)
+                || (0xFE30...0xFE4F).contains(v)
+                || (0xFF00...0xFF60).contains(v)
+                || (0xFFE0...0xFFE6).contains(v) {
+                w += 2
+            } else {
+                w += 1
+            }
+        }
+        return w
+    }
+
+    private static let risingChartSVG: String = """
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" \
+    stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3,17 9,11 13,14 20,6"/>
+      <polyline points="15,6 20,6 20,11"/>
+    </svg>
+    """
+
+    private static func risingChartIcon() -> NSImage? {
+        guard let data = risingChartSVG.data(using: .utf8),
+              let img = NSImage(data: data) else { return nil }
+        img.size = NSSize(width: 18, height: 18)
+        img.isTemplate = true
+        return img
     }
 
     static func formatPrice(_ v: Double) -> String {
@@ -230,7 +358,7 @@ final class StockStore: ObservableObject {
     private func savePrefs() {
         let prefs: [String: Any] = [
             "rotationInterval": rotationInterval,
-            "updateInterval": updateInterval
+            "simultaneousCount": simultaneousCount
         ]
         UserDefaults.standard.set(prefs, forKey: prefsKey)
     }
@@ -251,7 +379,7 @@ final class StockStore: ObservableObject {
         }
         if let prefs = UserDefaults.standard.dictionary(forKey: prefsKey) {
             if let r = prefs["rotationInterval"] as? TimeInterval { rotationInterval = r }
-            if let u = prefs["updateInterval"] as? TimeInterval { updateInterval = u }
+            if let s = prefs["simultaneousCount"] as? Int { simultaneousCount = min(max(s, 1), 6) }
         }
     }
 }

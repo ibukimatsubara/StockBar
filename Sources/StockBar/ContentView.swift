@@ -156,6 +156,7 @@ struct StockRow: View {
 
 struct SettingsView: View {
     @EnvironmentObject var store: StockStore
+    @StateObject private var launch = LaunchAtLogin.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -166,18 +167,45 @@ struct SettingsView: View {
                 step: 1,
                 format: { "\(Int($0))秒" }
             )
-            sliderRow(
-                label: "更新間隔",
-                value: $store.updateInterval,
-                range: 10...1800,
-                step: 10,
-                format: { formatSeconds($0) }
-            )
-            Text("市場閉場中は更新を停止し最後の値を表示します。")
+            simultaneousRow
+            Toggle(isOn: Binding(
+                get: { launch.isEnabled },
+                set: { launch.setEnabled($0) }
+            )) {
+                Text("ログイン時に自動起動")
+            }
+            .toggleStyle(.checkbox)
+            if let err = launch.lastError {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundColor(.red)
+            }
+            Text("価格は表示直前に銘柄ごとに取得します。ポップオーバーを開くと一括で再取得します。")
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
         .font(.caption)
+        .onAppear { launch.refresh() }
+    }
+
+    private var simultaneousRow: some View {
+        let binding = Binding<Int>(
+            get: { store.simultaneousCount },
+            set: { store.simultaneousCount = min(max($0, 1), 6) }
+        )
+        return HStack(spacing: 8) {
+            Text("同時表示").frame(width: 56, alignment: .leading)
+            Spacer(minLength: 0)
+            TextField("", value: binding, format: .number)
+                .frame(width: 48)
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.roundedBorder)
+            Text("銘柄")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            Stepper("", value: binding, in: 1...6, step: 1)
+                .labelsHidden()
+        }
     }
 
     private func sliderRow(

@@ -28,11 +28,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.start()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        UserDefaults.standard.synchronize()
+    }
+
     @objc private func togglePopover(_ sender: Any?) {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(sender)
         } else {
+            store.refreshOnOpen()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
@@ -40,7 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshTitle() {
         guard let button = statusItem.button else { return }
-        let title = store.menuBarAttributedTitle()
-        button.attributedTitle = title
+        let content = store.menuBarContent()
+        button.attributedTitle = content.title
+        button.image = content.image
+        button.imagePosition = (content.image != nil && content.title.length == 0)
+            ? .imageOnly : .imageLeft
     }
 }
