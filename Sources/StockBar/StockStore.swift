@@ -31,9 +31,7 @@ final class StockStore: ObservableObject {
     var onUpdate: (() -> Void)?
 
     private var rotationTimer: Timer?
-    private var tickerAnimTimer: Timer?
     private var tickerRefreshTimer: Timer?
-    private var tickerOffset: Int = 0
     /// 流れる表示の API 再取得間隔
     private let tickerRefreshInterval: TimeInterval = 60
     private var cancellables = Set<AnyCancellable>()
@@ -72,7 +70,6 @@ final class StockStore: ObservableObject {
         $displayMode
             .dropFirst()
             .sink { [weak self] _ in
-                self?.tickerOffset = 0
                 self?.chunkIndex = 0
                 self?.savePrefs()
                 self?.restartTimersForMode()
@@ -110,7 +107,6 @@ final class StockStore: ObservableObject {
 
     private func restartTimersForMode() {
         rotationTimer?.invalidate(); rotationTimer = nil
-        tickerAnimTimer?.invalidate(); tickerAnimTimer = nil
         tickerRefreshTimer?.invalidate(); tickerRefreshTimer = nil
         switch displayMode {
         case .rotation:
@@ -130,16 +126,6 @@ final class StockStore: ObservableObject {
     }
 
     private func startTickerTimers() {
-        NSLog("[StockBar] startTickerTimers")
-        let a = Timer(timeInterval: tickerStepInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.tickerOffset &+= 1
-                self.onUpdate?()
-            }
-        }
-        RunLoop.main.add(a, forMode: .common)
-        tickerAnimTimer = a
         let r = Timer(timeInterval: tickerRefreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refreshAll() }
         }
@@ -351,115 +337,60 @@ final class StockStore: ObservableObject {
                 image: Self.risingChartIcon()
             )
         }
-        switch displayMode {
-        case .rotation:
-            let groups = chunks
-            guard !groups.isEmpty else {
-                return MenuBarContent(title: NSAttributedString(string: ""), image: Self.risingChartIcon())
-            }
-            let group = groups[chunkIndex % groups.count]
-            let result = NSMutableAttributedString()
-            for (i, stock) in group.enumerated() {
-                if i > 0 {
-                    result.append(NSAttributedString(
-                        string: "  |  ",
-                        attributes: [.font: mono, .foregroundColor: NSColor.tertiaryLabelColor]
-                    ))
-                }
-                append(stock: stock, to: result, font: mono)
-            }
-            return MenuBarContent(title: result, image: nil)
-        case .ticker:
-            return MenuBarContent(title: tickerTitle(font: mono, stocks: vis), image: nil)
+        // ticker モードでもメニューバーの「描画は TickerView 側」になる。
+        // ここではローテーション表示のためのコンテンツを返す。
+        let groups = chunks
+        guard !groups.isEmpty else {
+            return MenuBarContent(title: NSAttributedString(string: ""), image: Self.risingChartIcon())
         }
+        let group = groups[chunkIndex % groups.count]
+        let result = NSMutableAttributedString()
+        for (i, stock) in group.enumerated() {
+            if i > 0 {
+                result.append(NSAttributedString(
+                    string: "  |  ",
+                    attributes: [.font: mono, .foregroundColor: NSColor.tertiaryLabelColor]
+                ))
+            }
+            append(stock: stock, to: result, font: mono)
+        }
+        return MenuBarContent(title: result, image: nil)
     }
 
-    /// 全銘柄を 1 本の長い帯に連結し、tickerOffset セル分だけ右→左にスライドした窓を返す。
-    private func tickerTitle(font mono: NSFont, stocks vis: [Stock]) -> NSAttributedString {
+    /// 流れる表示用に全銘柄を 1 本に連結した帯を返す。アニメーションは TickerView 側で行う。
+    func tickerStrip() -> NSAttributedString {
+        let mono = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let track = NSMutableAttributedString()
-        var cellWidths: [Int] = []  // UTF-16 unit ごとの可視セル幅
         let sep = "   •   "
-        func appendStr(_ s: String, color: NSColor) {
-            let start = track.length
-            track.append(NSAttributedString(string: s, attributes: [.font: mono, .foregroundColor: color]))
-            // UTF-16 単位で 1 文字ずつ可視幅を割り当て
-            var idx = s.startIndex
-            while idx < s.endIndex {
-                let ch = s[idx]
-                let w = Self.visualWidth(String(ch))
-                let units = String(ch).utf16.count
-                cellWidths.append(w)
-                for _ in 1..<units { cellWidths.append(0) }
-                idx = s.index(after: idx)
-            }
-            assert(cellWidths.count == track.length)
-            _ = start
-        }
-        for (i, stock) in vis.enumerated() {
+        for (i, stock) in visibleStocks.enumerated() {
             if i > 0 {
-                appendStr(sep, color: NSColor.tertiaryLabelColor)
+                track.append(NSAttributedString(
+                    string: sep,
+                    attributes: [.font: mono, .foregroundColor: NSColor.tertiaryLabelColor]
+                ))
             }
             let name = stock.displayName
             if let q = stock.quote {
                 let priceStr: String
                 if let m = q.sessionMarker { priceStr = "\(m) \(Self.formatPrice(q.price))" }
                 else { priceStr = Self.formatPrice(q.price) }
-                appendStr("\(name) \(priceStr) ", color: NSColor.labelColor)
+                track.append(NSAttributedString(
+                    string: "\(name) \(priceStr) ",
+                    attributes: [.font: mono, .foregroundColor: NSColor.labelColor]
+                ))
                 let chg = "\(Self.formatSigned(q.change)) \(String(format: "%+.2f%%", q.changePercent))"
-                appendStr(chg, color: q.change >= 0 ? .systemRed : .systemGreen)
+                track.append(NSAttributedString(
+                    string: chg,
+                    attributes: [.font: mono, .foregroundColor: q.change >= 0 ? NSColor.systemRed : NSColor.systemGreen]
+                ))
             } else {
-                appendStr("\(name) …", color: NSColor.secondaryLabelColor)
+                track.append(NSAttributedString(
+                    string: "\(name) …",
+                    attributes: [.font: mono, .foregroundColor: NSColor.secondaryLabelColor]
+                ))
             }
         }
-        // ループ終わりに必ずギャップを挟む（短い帯でもスクロール感を出すため）
-        let gapCells = max(8, tickerWidth / 2)
-        let gapStr = String(repeating: " ", count: gapCells)
-        track.append(NSAttributedString(string: gapStr, attributes: [.font: mono]))
-        for _ in 0..<gapCells { cellWidths.append(1) }
-
-        let totalCells = cellWidths.reduce(0, +)
-        guard totalCells > 0 else { return NSAttributedString(string: "") }
-        if tickerOffset % 50 == 0 {
-            NSLog("[StockBar] ticker: totalCells=\(totalCells) width=\(tickerWidth) offset=\(tickerOffset)")
-        }
-
-        // 帯を 2 連結してラップアラウンド対応
-        let doubled = NSMutableAttributedString(attributedString: track)
-        doubled.append(track)
-        let doubledWidths = cellWidths + cellWidths
-
-        // セル空間で [c0, c0 + window) を UTF-16 範囲に対応付け
-        let c0 = ((tickerOffset % totalCells) + totalCells) % totalCells
-        let cEnd = c0 + tickerWidth
-        var cellsSeen = 0
-        var startU = 0
-        var endU = doubled.length
-        var foundStart = false
-        for i in 0..<doubledWidths.count {
-            let next = cellsSeen + doubledWidths[i]
-            if !foundStart, next > c0 {
-                // i 番目の文字が境界をまたぐ → 1 つ進めて綺麗な位置にする
-                startU = (doubledWidths[i] > 1 && cellsSeen < c0) ? i + 1 : i
-                foundStart = true
-            }
-            if foundStart, next >= cEnd {
-                endU = (doubledWidths[i] > 1 && next > cEnd) ? i : i + 1
-                break
-            }
-            cellsSeen = next
-        }
-        if endU < startU { endU = startU }
-        let window = doubled.attributedSubstring(from: NSRange(location: startU, length: endU - startU))
-        let mut = NSMutableAttributedString(attributedString: window)
-        // 右側に足りない分はスペース埋め
-        let cur = Self.visualWidth(mut.string)
-        if cur < tickerWidth {
-            mut.append(NSAttributedString(
-                string: String(repeating: " ", count: tickerWidth - cur),
-                attributes: [.font: mono]
-            ))
-        }
-        return mut
+        return track
     }
 
     private func append(stock: Stock, to result: NSMutableAttributedString, font mono: NSFont) {
