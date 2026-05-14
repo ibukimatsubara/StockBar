@@ -2,12 +2,25 @@ import Foundation
 import AppKit
 import Combine
 
+enum DisplayMode: String, Codable, CaseIterable, Identifiable {
+    case rotation
+    case ticker
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .rotation: return "切替表示"
+        case .ticker:   return "右→左に流す"
+        }
+    }
+}
+
 @MainActor
 final class StockStore: ObservableObject {
     @Published var stocks: [Stock] = []
     @Published var rotationInterval: TimeInterval = 5
     @Published var simultaneousCount: Int = 1
     @Published var includeExtendedHours: Bool = false
+    @Published var displayMode: DisplayMode = .rotation
     @Published var focusMode: Bool = false
     @Published private(set) var chunkIndex: Int = 0
     @Published private(set) var lastError: String?
@@ -15,6 +28,15 @@ final class StockStore: ObservableObject {
     var onUpdate: (() -> Void)?
 
     private var rotationTimer: Timer?
+    private var tickerAnimTimer: Timer?
+    private var tickerRefreshTimer: Timer?
+    private var tickerOffset: Int = 0
+    /// 流れる表示の文字幅（半角セル数）
+    private let tickerWindowCells = 60
+    /// 流れる表示のアニメ間隔
+    private let tickerStepInterval: TimeInterval = 0.08
+    /// 流れる表示の API 再取得間隔
+    private let tickerRefreshInterval: TimeInterval = 60
     private var cancellables = Set<AnyCancellable>()
 
     private let stocksKey = "StockBar.stocks.v1"
@@ -47,24 +69,59 @@ final class StockStore: ObservableObject {
                 Task { @MainActor in await self?.refreshAll() }
             }
             .store(in: &cancellables)
+
+        $displayMode
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.tickerOffset = 0
+                self?.chunkIndex = 0
+                self?.savePrefs()
+                self?.restartTimersForMode()
+                self?.onUpdate?()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Lifecycle
 
     func start() {
         Task {
-            await refreshChunk(at: 0)
+            await refreshAll()
             onUpdate?()
-            await prefetchNext()
         }
-        startRotationTimer()
+        restartTimersForMode()
         onUpdate?()
+    }
+
+    private func restartTimersForMode() {
+        rotationTimer?.invalidate(); rotationTimer = nil
+        tickerAnimTimer?.invalidate(); tickerAnimTimer = nil
+        tickerRefreshTimer?.invalidate(); tickerRefreshTimer = nil
+        switch displayMode {
+        case .rotation:
+            startRotationTimer()
+        case .ticker:
+            startTickerTimers()
+        }
     }
 
     private func startRotationTimer() {
         rotationTimer?.invalidate()
         rotationTimer = Timer.scheduledTimer(withTimeInterval: rotationInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
+        }
+    }
+
+    private func startTickerTimers() {
+        tickerAnimTimer = Timer.scheduledTimer(withTimeInterval: tickerStepInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.tickerOffset &+= 1
+                self.onUpdate?()
+            }
+        }
+        tickerRefreshTimer = Timer.scheduledTimer(withTimeInterval: tickerRefreshInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshAll() }
         }
     }
 
@@ -179,9 +236,7 @@ final class StockStore: ObservableObject {
     }
 
     func refreshOne(symbol: String) async {
-        guard !isMarketGloballyClosedForAll() || quoteAge(symbol: symbol) > 60 * 60 else {
-            return
-        }
+        guard shouldRefresh(symbol: symbol) else { return }
         do {
             let q = try await YahooFinance.fetch(symbol: symbol, includeExtendedHours: includeExtendedHours)
             if let idx = stocks.firstIndex(where: { $0.symbol == symbol }) {
@@ -201,29 +256,51 @@ final class StockStore: ObservableObject {
         }
     }
 
-    private func quoteAge(symbol: String) -> TimeInterval {
-        // unused: placeholder for future incremental update logic
-        return .infinity
+    enum MarketRegion { case jp, us, alwaysOn }
+
+    static func marketRegion(for symbol: String) -> MarketRegion {
+        let s = symbol.uppercased()
+        if s.hasSuffix(".T") { return .jp }
+        if s == "^N225" || s == "^TPX" || s.hasPrefix("^N3") || s.hasPrefix("^TPX") { return .jp }
+        if s.hasSuffix("=X") || s.hasSuffix("-USD") || s.hasSuffix("=F") { return .alwaysOn }
+        return .us
     }
 
-    /// 雑な判定：日本市場 or 米国市場のどちらかが開いていれば true。
-    private func isMarketGloballyClosedForAll() -> Bool {
-        let now = Date()
-        var jp = Calendar(identifier: .gregorian)
-        jp.timeZone = TimeZone(identifier: "Asia/Tokyo")!
-        var us = Calendar(identifier: .gregorian)
-        us.timeZone = TimeZone(identifier: "America/New_York")!
-
-        func isOpen(_ cal: Calendar, openH: Int, openM: Int, closeH: Int, closeM: Int) -> Bool {
-            let comps = cal.dateComponents([.weekday, .hour, .minute], from: now)
-            guard let wd = comps.weekday, wd >= 2 && wd <= 6 else { return false }
-            let h = comps.hour ?? 0, m = comps.minute ?? 0
-            let cur = h * 60 + m
-            return cur >= openH * 60 + openM && cur <= closeH * 60 + closeM
+    /// 各銘柄を再取得すべきかどうか。市場時間外は最大 6 時間に 1 回まで（クローズ直後のスナップショット取得用）。
+    func shouldRefresh(symbol: String) -> Bool {
+        let region = Self.marketRegion(for: symbol)
+        if region == .alwaysOn { return true }
+        if isMarketOpen(region: region) { return true }
+        guard let stock = stocks.first(where: { $0.symbol == symbol }),
+              let last = stock.lastFetched else {
+            return true
         }
-        let jpOpen = isOpen(jp, openH: 9, openM: 0, closeH: 15, closeM: 0)
-        let usOpen = isOpen(us, openH: 9, openM: 30, closeH: 16, closeM: 0)
-        return !(jpOpen || usOpen)
+        return Date().timeIntervalSince(last) > 6 * 3600
+    }
+
+    private func isMarketOpen(region: MarketRegion) -> Bool {
+        let now = Date()
+        switch region {
+        case .alwaysOn:
+            return true
+        case .jp:
+            return isWithin(now, tz: "Asia/Tokyo", openH: 9, openM: 0, closeH: 15, closeM: 0)
+        case .us:
+            if includeExtendedHours {
+                // pre 4:00 〜 after 20:00 ET
+                return isWithin(now, tz: "America/New_York", openH: 4, openM: 0, closeH: 20, closeM: 0)
+            }
+            return isWithin(now, tz: "America/New_York", openH: 9, openM: 30, closeH: 16, closeM: 0)
+        }
+    }
+
+    private func isWithin(_ date: Date, tz: String, openH: Int, openM: Int, closeH: Int, closeM: Int) -> Bool {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: tz)!
+        let comps = cal.dateComponents([.weekday, .hour, .minute], from: date)
+        guard let wd = comps.weekday, wd >= 2 && wd <= 6 else { return false }
+        let cur = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        return cur >= openH * 60 + openM && cur <= closeH * 60 + closeM
     }
 
     // MARK: - Menu bar title
@@ -252,22 +329,111 @@ final class StockStore: ObservableObject {
                 image: Self.risingChartIcon()
             )
         }
-        let groups = chunks
-        guard !groups.isEmpty else {
-            return MenuBarContent(title: NSAttributedString(string: ""), image: Self.risingChartIcon())
-        }
-        let group = groups[chunkIndex % groups.count]
-        let result = NSMutableAttributedString()
-        for (i, stock) in group.enumerated() {
-            if i > 0 {
-                result.append(NSAttributedString(
-                    string: "  |  ",
-                    attributes: [.font: mono, .foregroundColor: NSColor.tertiaryLabelColor]
-                ))
+        switch displayMode {
+        case .rotation:
+            let groups = chunks
+            guard !groups.isEmpty else {
+                return MenuBarContent(title: NSAttributedString(string: ""), image: Self.risingChartIcon())
             }
-            append(stock: stock, to: result, font: mono)
+            let group = groups[chunkIndex % groups.count]
+            let result = NSMutableAttributedString()
+            for (i, stock) in group.enumerated() {
+                if i > 0 {
+                    result.append(NSAttributedString(
+                        string: "  |  ",
+                        attributes: [.font: mono, .foregroundColor: NSColor.tertiaryLabelColor]
+                    ))
+                }
+                append(stock: stock, to: result, font: mono)
+            }
+            return MenuBarContent(title: result, image: nil)
+        case .ticker:
+            return MenuBarContent(title: tickerTitle(font: mono, stocks: vis), image: nil)
         }
-        return MenuBarContent(title: result, image: nil)
+    }
+
+    /// 全銘柄を 1 本の長い帯に連結し、tickerOffset セル分だけ右→左にスライドした窓を返す。
+    private func tickerTitle(font mono: NSFont, stocks vis: [Stock]) -> NSAttributedString {
+        let track = NSMutableAttributedString()
+        var cellWidths: [Int] = []  // UTF-16 unit ごとの可視セル幅
+        let sep = "   •   "
+        func appendStr(_ s: String, color: NSColor) {
+            let start = track.length
+            track.append(NSAttributedString(string: s, attributes: [.font: mono, .foregroundColor: color]))
+            // UTF-16 単位で 1 文字ずつ可視幅を割り当て
+            var idx = s.startIndex
+            while idx < s.endIndex {
+                let ch = s[idx]
+                let w = Self.visualWidth(String(ch))
+                let units = String(ch).utf16.count
+                cellWidths.append(w)
+                for _ in 1..<units { cellWidths.append(0) }
+                idx = s.index(after: idx)
+            }
+            assert(cellWidths.count == track.length)
+            _ = start
+        }
+        for (i, stock) in vis.enumerated() {
+            if i > 0 {
+                appendStr(sep, color: NSColor.tertiaryLabelColor)
+            }
+            let name = stock.displayName
+            if let q = stock.quote {
+                let priceStr: String
+                if let m = q.sessionMarker { priceStr = "\(m) \(Self.formatPrice(q.price))" }
+                else { priceStr = Self.formatPrice(q.price) }
+                appendStr("\(name) \(priceStr) ", color: NSColor.labelColor)
+                let chg = "\(Self.formatSigned(q.change)) \(String(format: "%+.2f%%", q.changePercent))"
+                appendStr(chg, color: q.change >= 0 ? .systemRed : .systemGreen)
+            } else {
+                appendStr("\(name) …", color: NSColor.secondaryLabelColor)
+            }
+        }
+        let totalCells = cellWidths.reduce(0, +)
+        guard totalCells > 0 else { return NSAttributedString(string: "") }
+
+        // 帯が窓より短ければそのまま表示
+        if totalCells <= tickerWindowCells {
+            return track
+        }
+
+        // 帯を 2 連結してラップアラウンド対応
+        let doubled = NSMutableAttributedString(attributedString: track)
+        doubled.append(track)
+        let doubledWidths = cellWidths + cellWidths
+
+        // セル空間で [c0, c0 + window) を UTF-16 範囲に対応付け
+        let c0 = ((tickerOffset % totalCells) + totalCells) % totalCells
+        let cEnd = c0 + tickerWindowCells
+        var cellsSeen = 0
+        var startU = 0
+        var endU = doubled.length
+        var foundStart = false
+        for i in 0..<doubledWidths.count {
+            let next = cellsSeen + doubledWidths[i]
+            if !foundStart, next > c0 {
+                // i 番目の文字が境界をまたぐ → 1 つ進めて綺麗な位置にする
+                startU = (doubledWidths[i] > 1 && cellsSeen < c0) ? i + 1 : i
+                foundStart = true
+            }
+            if foundStart, next >= cEnd {
+                endU = (doubledWidths[i] > 1 && next > cEnd) ? i : i + 1
+                break
+            }
+            cellsSeen = next
+        }
+        if endU < startU { endU = startU }
+        let window = doubled.attributedSubstring(from: NSRange(location: startU, length: endU - startU))
+        let mut = NSMutableAttributedString(attributedString: window)
+        // 右側に足りない分はスペース埋め
+        let cur = Self.visualWidth(mut.string)
+        if cur < tickerWindowCells {
+            mut.append(NSAttributedString(
+                string: String(repeating: " ", count: tickerWindowCells - cur),
+                attributes: [.font: mono]
+            ))
+        }
+        return mut
     }
 
     private func append(stock: Stock, to result: NSMutableAttributedString, font mono: NSFont) {
@@ -389,7 +555,8 @@ final class StockStore: ObservableObject {
         let prefs: [String: Any] = [
             "rotationInterval": rotationInterval,
             "simultaneousCount": simultaneousCount,
-            "includeExtendedHours": includeExtendedHours
+            "includeExtendedHours": includeExtendedHours,
+            "displayMode": displayMode.rawValue
         ]
         UserDefaults.standard.set(prefs, forKey: prefsKey)
     }
@@ -412,6 +579,7 @@ final class StockStore: ObservableObject {
             if let r = prefs["rotationInterval"] as? TimeInterval { rotationInterval = r }
             if let s = prefs["simultaneousCount"] as? Int { simultaneousCount = min(max(s, 1), 6) }
             if let e = prefs["includeExtendedHours"] as? Bool { includeExtendedHours = e }
+            if let m = prefs["displayMode"] as? String, let mode = DisplayMode(rawValue: m) { displayMode = mode }
         }
     }
 }

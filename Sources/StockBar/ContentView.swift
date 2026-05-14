@@ -214,14 +214,22 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sliderRow(
-                label: "切替間隔",
-                value: $store.rotationInterval,
-                range: 1...30,
-                step: 1,
-                format: { "\(Int($0))秒" }
-            )
-            simultaneousRow
+            Picker("表示モード", selection: $store.displayMode) {
+                ForEach(DisplayMode.allCases) { m in
+                    Text(m.label).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            if store.displayMode == .rotation {
+                sliderRow(
+                    label: "切替間隔",
+                    value: $store.rotationInterval,
+                    range: 1...30,
+                    step: 1,
+                    format: { "\(Int($0))秒" }
+                )
+                simultaneousRow
+            }
             Toggle(isOn: $store.includeExtendedHours) {
                 Text("米国のプレ／アフターマーケットを表示")
             }
