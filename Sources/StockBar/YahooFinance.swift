@@ -55,9 +55,10 @@ enum YahooFinance {
         let chart: Chart
     }
 
-    static func fetch(symbol: String) async throws -> Quote {
+    static func fetch(symbol: String, includeExtendedHours: Bool = true) async throws -> Quote {
         let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
-        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=1m&range=1d&includePrePost=true")!
+        let prePost = includeExtendedHours ? "true" : "false"
+        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=1m&range=1d&includePrePost=\(prePost)")!
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10

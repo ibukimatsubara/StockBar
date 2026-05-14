@@ -7,6 +7,7 @@ final class StockStore: ObservableObject {
     @Published var stocks: [Stock] = []
     @Published var rotationInterval: TimeInterval = 5
     @Published var simultaneousCount: Int = 1
+    @Published var includeExtendedHours: Bool = false
     @Published var focusMode: Bool = false
     @Published private(set) var chunkIndex: Int = 0
     @Published private(set) var lastError: String?
@@ -36,6 +37,14 @@ final class StockStore: ObservableObject {
                 self?.chunkIndex = 0
                 self?.savePrefs()
                 self?.onUpdate?()
+            }
+            .store(in: &cancellables)
+
+        $includeExtendedHours
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.savePrefs()
+                Task { @MainActor in await self?.refreshAll() }
             }
             .store(in: &cancellables)
     }
@@ -174,7 +183,7 @@ final class StockStore: ObservableObject {
             return
         }
         do {
-            let q = try await YahooFinance.fetch(symbol: symbol)
+            let q = try await YahooFinance.fetch(symbol: symbol, includeExtendedHours: includeExtendedHours)
             if let idx = stocks.firstIndex(where: { $0.symbol == symbol }) {
                 stocks[idx].quote = q
                 stocks[idx].lastError = nil
@@ -379,7 +388,8 @@ final class StockStore: ObservableObject {
     private func savePrefs() {
         let prefs: [String: Any] = [
             "rotationInterval": rotationInterval,
-            "simultaneousCount": simultaneousCount
+            "simultaneousCount": simultaneousCount,
+            "includeExtendedHours": includeExtendedHours
         ]
         UserDefaults.standard.set(prefs, forKey: prefsKey)
     }
@@ -401,6 +411,7 @@ final class StockStore: ObservableObject {
         if let prefs = UserDefaults.standard.dictionary(forKey: prefsKey) {
             if let r = prefs["rotationInterval"] as? TimeInterval { rotationInterval = r }
             if let s = prefs["simultaneousCount"] as? Int { simultaneousCount = min(max(s, 1), 6) }
+            if let e = prefs["includeExtendedHours"] as? Bool { includeExtendedHours = e }
         }
     }
 }

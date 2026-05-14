@@ -222,6 +222,10 @@ struct SettingsView: View {
                 format: { "\(Int($0))秒" }
             )
             simultaneousRow
+            Toggle(isOn: $store.includeExtendedHours) {
+                Text("米国のプレ／アフターマーケットを表示")
+            }
+            .toggleStyle(.checkbox)
             Toggle(isOn: Binding(
                 get: { launch.isEnabled },
                 set: { launch.setEnabled($0) }
