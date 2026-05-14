@@ -38,7 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(sender)
         } else {
             store.refreshOnOpen()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // ボタン右端を基準にする。バー幅が変わってもステータスバー上の右端は動かないので位置が安定する。
+            let anchor = NSRect(x: button.bounds.maxX - 1, y: 0, width: 1, height: button.bounds.height)
+            popover.show(relativeTo: anchor, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
     }

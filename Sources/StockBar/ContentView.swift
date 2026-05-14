@@ -229,6 +229,9 @@ struct SettingsView: View {
                     format: { "\(Int($0))秒" }
                 )
                 simultaneousRow
+            } else {
+                tickerWidthRow
+                tickerSpeedRow
             }
             Toggle(isOn: $store.includeExtendedHours) {
                 Text("米国のプレ／アフターマーケットを表示")
@@ -252,6 +255,38 @@ struct SettingsView: View {
         }
         .font(.caption)
         .onAppear { launch.refresh() }
+    }
+
+    private var tickerWidthRow: some View {
+        let binding = Binding<Double>(
+            get: { Double(store.tickerWidth) },
+            set: { store.tickerWidth = min(max(Int($0), 20), 400) }
+        )
+        return HStack(spacing: 10) {
+            Text("バー幅").frame(width: 56, alignment: .leading)
+            Slider(value: binding, in: 20...400, step: 5)
+            Text("\(store.tickerWidth)桁")
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 48, alignment: .trailing)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    /// 速度。バインドは「逆」向き: スライダー右 = 速い。
+    private var tickerSpeedRow: some View {
+        // 内部は 30ms (速い) 〜 300ms (遅い)。スライダー値はそのまま使い表示反転で「速い⇄遅い」を見せる。
+        let binding = Binding<Double>(
+            get: { store.tickerStepInterval * 1000 },
+            set: { store.tickerStepInterval = min(max($0 / 1000, 0.03), 0.30) }
+        )
+        return HStack(spacing: 10) {
+            Text("速度").frame(width: 56, alignment: .leading)
+            Slider(value: binding, in: 30...300, step: 10)
+            Text("\(Int(store.tickerStepInterval * 1000))ms")
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 48, alignment: .trailing)
+                .foregroundColor(.secondary)
+        }
     }
 
     private var simultaneousRow: some View {

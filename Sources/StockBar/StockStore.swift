@@ -21,6 +21,9 @@ final class StockStore: ObservableObject {
     @Published var simultaneousCount: Int = 1
     @Published var includeExtendedHours: Bool = false
     @Published var displayMode: DisplayMode = .rotation
+    @Published var tickerWidth: Int = 60
+    /// 1セル進むのにかかる時間（秒）。小さいほど速い。
+    @Published var tickerStepInterval: TimeInterval = 0.08
     @Published var focusMode: Bool = false
     @Published private(set) var chunkIndex: Int = 0
     @Published private(set) var lastError: String?
@@ -31,10 +34,6 @@ final class StockStore: ObservableObject {
     private var tickerAnimTimer: Timer?
     private var tickerRefreshTimer: Timer?
     private var tickerOffset: Int = 0
-    /// 流れる表示の文字幅（半角セル数）
-    private let tickerWindowCells = 60
-    /// 流れる表示のアニメ間隔
-    private let tickerStepInterval: TimeInterval = 0.08
     /// 流れる表示の API 再取得間隔
     private let tickerRefreshInterval: TimeInterval = 60
     private var cancellables = Set<AnyCancellable>()
@@ -80,6 +79,22 @@ final class StockStore: ObservableObject {
                 self?.onUpdate?()
             }
             .store(in: &cancellables)
+
+        $tickerWidth
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.savePrefs()
+                self?.onUpdate?()
+            }
+            .store(in: &cancellables)
+
+        $tickerStepInterval
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.savePrefs()
+                if self?.displayMode == .ticker { self?.restartTimersForMode() }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Lifecycle
@@ -107,22 +122,29 @@ final class StockStore: ObservableObject {
 
     private func startRotationTimer() {
         rotationTimer?.invalidate()
-        rotationTimer = Timer.scheduledTimer(withTimeInterval: rotationInterval, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: rotationInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        rotationTimer = t
     }
 
     private func startTickerTimers() {
-        tickerAnimTimer = Timer.scheduledTimer(withTimeInterval: tickerStepInterval, repeats: true) { [weak self] _ in
+        NSLog("[StockBar] startTickerTimers")
+        let a = Timer(timeInterval: tickerStepInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.tickerOffset &+= 1
                 self.onUpdate?()
             }
         }
-        tickerRefreshTimer = Timer.scheduledTimer(withTimeInterval: tickerRefreshInterval, repeats: true) { [weak self] _ in
+        RunLoop.main.add(a, forMode: .common)
+        tickerAnimTimer = a
+        let r = Timer(timeInterval: tickerRefreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refreshAll() }
         }
+        RunLoop.main.add(r, forMode: .common)
+        tickerRefreshTimer = r
     }
 
     /// 既にフェッチ済みの次グループを即座に表示し、さらに次のグループをバックグラウンドで先読みする。
@@ -389,12 +411,16 @@ final class StockStore: ObservableObject {
                 appendStr("\(name) …", color: NSColor.secondaryLabelColor)
             }
         }
+        // ループ終わりに必ずギャップを挟む（短い帯でもスクロール感を出すため）
+        let gapCells = max(8, tickerWidth / 2)
+        let gapStr = String(repeating: " ", count: gapCells)
+        track.append(NSAttributedString(string: gapStr, attributes: [.font: mono]))
+        for _ in 0..<gapCells { cellWidths.append(1) }
+
         let totalCells = cellWidths.reduce(0, +)
         guard totalCells > 0 else { return NSAttributedString(string: "") }
-
-        // 帯が窓より短ければそのまま表示
-        if totalCells <= tickerWindowCells {
-            return track
+        if tickerOffset % 50 == 0 {
+            NSLog("[StockBar] ticker: totalCells=\(totalCells) width=\(tickerWidth) offset=\(tickerOffset)")
         }
 
         // 帯を 2 連結してラップアラウンド対応
@@ -404,7 +430,7 @@ final class StockStore: ObservableObject {
 
         // セル空間で [c0, c0 + window) を UTF-16 範囲に対応付け
         let c0 = ((tickerOffset % totalCells) + totalCells) % totalCells
-        let cEnd = c0 + tickerWindowCells
+        let cEnd = c0 + tickerWidth
         var cellsSeen = 0
         var startU = 0
         var endU = doubled.length
@@ -427,9 +453,9 @@ final class StockStore: ObservableObject {
         let mut = NSMutableAttributedString(attributedString: window)
         // 右側に足りない分はスペース埋め
         let cur = Self.visualWidth(mut.string)
-        if cur < tickerWindowCells {
+        if cur < tickerWidth {
             mut.append(NSAttributedString(
-                string: String(repeating: " ", count: tickerWindowCells - cur),
+                string: String(repeating: " ", count: tickerWidth - cur),
                 attributes: [.font: mono]
             ))
         }
@@ -556,7 +582,9 @@ final class StockStore: ObservableObject {
             "rotationInterval": rotationInterval,
             "simultaneousCount": simultaneousCount,
             "includeExtendedHours": includeExtendedHours,
-            "displayMode": displayMode.rawValue
+            "displayMode": displayMode.rawValue,
+            "tickerWidth": tickerWidth,
+            "tickerStepInterval": tickerStepInterval
         ]
         UserDefaults.standard.set(prefs, forKey: prefsKey)
     }
@@ -580,6 +608,8 @@ final class StockStore: ObservableObject {
             if let s = prefs["simultaneousCount"] as? Int { simultaneousCount = min(max(s, 1), 6) }
             if let e = prefs["includeExtendedHours"] as? Bool { includeExtendedHours = e }
             if let m = prefs["displayMode"] as? String, let mode = DisplayMode(rawValue: m) { displayMode = mode }
+            if let w = prefs["tickerWidth"] as? Int { tickerWidth = min(max(w, 20), 400) }
+            if let s = prefs["tickerStepInterval"] as? TimeInterval { tickerStepInterval = min(max(s, 0.03), 0.30) }
         }
     }
 }
