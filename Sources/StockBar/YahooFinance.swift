@@ -102,16 +102,13 @@ enum YahooFinance {
         }
 
         // 比較ベースライン:
-        //  - pre / regular: 前営業日の終値
+        //  - pre / regular / closed: 前営業日の終値
         //  - post (AH): 本日の通常セッション終値（= regularMarketPrice）
-        //  - closed: 最後の通常終値があればそれ、なければ前日終値
         let baseline: Double
         switch session {
-        case .pre, .regular:
+        case .pre, .regular, .closed:
             baseline = prevDayClose
         case .post:
-            baseline = regularPrice != 0 ? regularPrice : prevDayClose
-        case .closed:
             baseline = regularPrice != 0 ? regularPrice : prevDayClose
         }
 
