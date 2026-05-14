@@ -13,6 +13,14 @@ final class TickerView: NSView {
     private var animTimer: Timer?
 
     func setAttributedString(_ s: NSAttributedString) {
+        // 文字列幅が変わると trackWidth が変わり、pixelOffset の剰余が飛んで
+        // 見た目の位置がジャンプする。更新前の trackWidth で正規化しておくと
+        // 1 周目の描画位置 (-offset) が更新前後で連続する。
+        if stringSize.width > 0 {
+            let oldTrackWidth = stringSize.width + gapPixels
+            pixelOffset = pixelOffset.truncatingRemainder(dividingBy: oldTrackWidth)
+            if pixelOffset < 0 { pixelOffset += oldTrackWidth }
+        }
         attributedString = s
         stringSize = s.size()
         needsDisplay = true
